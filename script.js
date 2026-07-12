@@ -27,7 +27,6 @@ const whiteNameEl = document.getElementById('white-name');
 const gameHint = document.getElementById('game-hint');
 const leaveRoomBtn = document.getElementById('leave-room-btn');
 const restartBtn = document.getElementById('restart-btn');
-const undoBtn = document.getElementById('undo-btn');
 const winModal = document.getElementById('win-modal');
 const winnerDisplay = document.getElementById('winner-display');
 const winDescription = document.getElementById('win-description');
@@ -151,7 +150,15 @@ function showGameRoom() {
     game.reset(currentRoom);
 }
 
-leaveRoomBtn.addEventListener('click', () => { stopSync(); currentRoom = null; game.cleanup(); showLobby(); });
+leaveRoomBtn.addEventListener('click', async () => {
+    if (currentRoom) {
+        try { await api(`/api/rooms/${currentRoom.room_code}/leave`, 'POST'); } catch (err) {}
+    }
+    stopSync();
+    currentRoom = null;
+    if (game) game.cleanup();
+    showLobby();
+});
 
 restartBtn.addEventListener('click', async () => {
     if (!currentRoom) return;
@@ -234,21 +241,6 @@ class GomokuOnline {
         this.canvas.addEventListener('click', (e) => this.handleClick(e));
         this.canvas.addEventListener('mousemove', (e) => this.handleHover(e));
         this.canvas.addEventListener('mouseleave', () => this.drawBoard());
-        
-        undoBtn.addEventListener('click', async () => {
-            if (!currentRoom || this.gameOver || !this.gameStarted) return;
-            if (this.myColor !== this.currentTurn) {
-                try {
-                    const data = await api(`/api/rooms/${currentRoom.room_code}/undo`, 'POST');
-                    this.pieces = JSON.parse(JSON.stringify(data.board_state));
-                    this.currentTurn = data.current_turn;
-                    this.moveCount = (data.move_history || []).length;
-                    moveCountEl.textContent = this.moveCount;
-                    gameHint.textContent = '轮到你了！';
-                    this.updateTurnUI(); this.drawBoard();
-                } catch (err) {}
-            }
-        });
     }
     
     startTimer() {
