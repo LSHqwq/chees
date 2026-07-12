@@ -111,32 +111,62 @@ async function syncLoop() {
     if (!currentRoom || !currentRoom.room_code) { syncTimer = setTimeout(syncLoop, 2000); return; }
     try {
         const data = await api(`/api/rooms/${currentRoom.room_code}`);
-        if (data.black_player) blackNameEl.textContent = data.black_player;
-        if (data.white_player) whiteNameEl.textContent = data.white_player;
         
+        // 更新玩家名
+        if (data.black_player) blackNameEl.textContent = data.black_player;
+        else blackNameEl.textContent = '等待中';
+        if (data.white_player) whiteNameEl.textContent = data.white_player;
+        else whiteNameEl.textContent = '等待中';
+        
+        // 房主检测对手加入（waiting -> playing）
         if (data.status === 'playing' && currentRoom.status === 'waiting') {
             currentRoom.status = 'playing';
             currentRoom.black_player = data.black_player;
             currentRoom.white_player = data.white_player;
-            game.myColor = 'black'; game.onGameStart();
+            game.myColor = 'black';
+            game.onGameStart();
         }
         
-        if (game) {
+        if (game && !game.gameOver) {
             const serverBoard = JSON.stringify(data.board_state);
             const localBoard = JSON.stringify(game.pieces);
-            if (serverBoard !== localBoard) game.syncFromServer(data);
             
-            const mhLen = (data.move_history || []).length;
-            if (data.status === 'playing' && mhLen === 0 && game.moveCount > 0 && !game.gameOver) {
-                game.reset(currentRoom); game.onGameStart();
+            // 棋盘变了，同步
+            if (serverBoard !== localBoard) {
+                game.syncFromServer(data);
             }
-            if (data.status === 'finished' && !game.gameOver) game.onGameEnd(data);
-            if (data.status === 'playing' && game.gameOver) {
-                game.reset(currentRoom); game.onGameStart();
+            
+            // 检测到重新开始（棋盘清空但我还有棋子）
+            const mhLen = (data.move_history || []).length;
+            if (data.status === 'playing' && mhLen === 0 && game.moveCount > 0) {
+                game.reset(currentRoom);
+                game.onGameStart();
+            }
+            
+            // 游戏结束
+            if (data.status === 'finished') {
+                game.onGameEnd(data);
             }
         }
+        
+        // 游戏结束后对方重新开始了
+        if (data.status === 'playing' && game && game.gameOver) {
+            game.reset(currentRoom);
+            game.onGameStart();
+        }
+        
         currentRoom.status = data.status;
-    } catch (err) {}
+    } catch (err) {
+        // 房间可能被删除了
+        if (err.message === '房间不存在') {
+            stopSync();
+            alert('房间已解散');
+            currentRoom = null;
+            if (game) game.cleanup();
+            showLobby();
+            return;
+        }
+    }
     syncTimer = setTimeout(syncLoop, 1000);
 }
 
@@ -161,14 +191,22 @@ leaveRoomBtn.addEventListener('click', async () => {
 });
 
 restartBtn.addEventListener('click', async () => {
-    if (!currentRoom) return;
-    try { await api(`/api/rooms/${currentRoom.room_code}/restart`, 'POST'); game.reset(currentRoom); game.onGameStart(); } catch (err) {}
+    if (!currentRoom || game.gameStarted === false) return;
+    try {
+        await api(`/api/rooms/${currentRoom.room_code}/restart`, 'POST');
+        game.reset(currentRoom);
+        game.onGameStart();
+    } catch (err) {}
 });
 
 modalRestartBtn.addEventListener('click', async () => {
     winModal.style.display = 'none';
     if (!currentRoom) return;
-    try { await api(`/api/rooms/${currentRoom.room_code}/restart`, 'POST'); game.reset(currentRoom); game.onGameStart(); } catch (err) {}
+    try {
+        await api(`/api/rooms/${currentRoom.room_code}/restart`, 'POST');
+        game.reset(currentRoom);
+        game.onGameStart();
+    } catch (err) {}
 });
 
 // ========== 游戏类 ==========
@@ -196,27 +234,38 @@ class GomokuOnline {
         currentPlayerText.textContent = '黑棋走子';
         blackCard.classList.add('active-player'); whiteCard.classList.remove('active-player');
         if (roomData && roomData.status === 'waiting') {
-            gameHint.textContent = '等待对手加入...'; gameStatusDiv.textContent = '⏳ 等待中';
+            gameHint.textContent = '等待对手加入...';
+            gameStatusDiv.textContent = '⏳ 等待中';
         }
         this.drawBoard();
     }
     
     onGameStart() {
         if (this.gameStarted) return;
-        this.gameStarted = true; this.gameStartTime = Date.now(); this.startTimer();
-        gameStatusDiv.textContent = '🎯 游戏进行中'; gameStatusDiv.className = 'status-display';
-        gameHint.textContent = this.myColor === 'black' ? '你执黑，请落子' : '你执白，等待黑棋落子';
+        this.gameStarted = true;
+        this.gameStartTime = Date.now();
+        this.startTimer();
+        gameStatusDiv.textContent = '🎯 游戏进行中';
+        gameStatusDiv.className = 'status-display';
+        if (this.myColor === 'black') {
+            gameHint.textContent = '你执黑，请落子';
+        } else {
+            gameHint.textContent = '你执白，等待黑棋落子';
+        }
     }
     
     onGameEnd(data) {
-        this.gameOver = true; this.stopTimer();
-        gameStatusDiv.textContent = '🏆 游戏结束'; gameStatusDiv.className = 'status-display win';
+        this.gameOver = true;
+        this.stopTimer();
+        gameStatusDiv.textContent = '🏆 游戏结束';
+        gameStatusDiv.className = 'status-display win';
         gameHint.textContent = '游戏结束';
         const winnerName = data.winner || '';
         const isMe = (data.winner_id === currentUser.id || winnerName === currentUser.username);
         winnerDisplay.textContent = isMe ? '🎉 你赢了！' : '💪 ' + winnerName + ' 获胜';
         winDescription.textContent = '经过 ' + this.moveCount + ' 步';
-        winModal.style.display = 'flex'; this.drawBoard();
+        winModal.style.display = 'flex';
+        this.drawBoard();
     }
     
     syncFromServer(data) {
@@ -225,8 +274,12 @@ class GomokuOnline {
         this.moveCount = (data.move_history || []).length;
         moveCountEl.textContent = this.moveCount;
         this.updateTurnUI();
-        if (data.status === 'finished') { this.gameOver = true; this.stopTimer(); }
-        else { gameHint.textContent = this.myColor === this.currentTurn ? '轮到你了！' : '等待对手落子...'; }
+        if (data.status === 'finished') {
+            this.gameOver = true;
+            this.stopTimer();
+        } else {
+            gameHint.textContent = this.myColor === this.currentTurn ? '轮到你了！' : '等待对手落子...';
+        }
         this.drawBoard();
     }
     
@@ -315,7 +368,7 @@ class GomokuOnline {
             moveCountEl.textContent = this.moveCount;
             if (data.game_over) {
                 this.gameOver = true; this.stopTimer();
-                gameStatusDiv.textContent = '🏆 ' + data.winner + ' 获胜！';
+                gameStatusDiv.textContent = '🏆 游戏结束';
                 gameStatusDiv.className = 'status-display win';
                 gameHint.textContent = '游戏结束';
                 const isMe = (data.winner_id === currentUser.id || data.winner === currentUser.username);
