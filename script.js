@@ -608,7 +608,7 @@ class GomokuOnline {
     }
 
     patternScore(count, open, isAI) {
-        // 防守价值 = 攻击价值 * 1.5
+        // 防守价值 = 攻击价值 * 1.6
         const bonus = isAI ? 1.0 : 1.6;
         
         if (count >= 5) return 100000;
@@ -617,8 +617,8 @@ class GomokuOnline {
             if (open === 1) return 12000 * bonus;  // 冲四
         }
         if (count === 3) {
-            if (open === 2) return 5000 * bonus;   // 活三
-            if (open === 1) return 2500 * bonus;   // 眠三
+            if (open === 2) return 6000 * bonus;   // 活三
+            if (open === 1) return 3000 * bonus;   // 眠三
         }
         if (count === 2) {
             if (open === 2) return 500 * bonus;    // 活二
