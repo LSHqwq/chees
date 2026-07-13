@@ -522,36 +522,35 @@ class GomokuOnline {
         }
     }
 
-        quickEval(x, y, player) {
+    quickEval(x, y, player) {
         let score = 0;
         const dirs = [[1,0],[0,1],[1,1],[1,-1]];
         const opponent = player === 'white' ? 'black' : 'white';
         
-        // 模拟下子后评估自己
+        // 评估自己
         this.pieces[y][x] = player;
+        let selfFours = 0, selfThrees = 0, selfSleepThrees = 0;
         for (const [dx, dy] of dirs) {
             const { count, open } = this.countDirection(x, y, dx, dy, player);
             score += this.patternScore(count, open, player === 'white');
+            if (count === 4 && open >= 1) selfFours++;
+            if (count === 3 && open === 2) selfThrees++;
+            if (count === 3 && open === 1) selfSleepThrees++;
         }
+        if (selfFours >= 1 || selfThrees >= 2) score += 50000;
+        if (selfSleepThrees >= 2) score += 20000;
         
-        // 检测自己是否形成杀招
-        let openFours = 0, openThrees = 0;
-        for (const [dx, dy] of dirs) {
-            const { count, open } = this.countDirection(x, y, dx, dy, player);
-            if (count === 4 && open >= 1) openFours++;
-            if (count === 3 && open === 2) openThrees++;
-        }
-        if (openFours >= 1 || openThrees >= 2) score += 50000;
-        
-        // 评估对方如果占这个点的威胁（防守价值）
+        // 评估对手
         this.pieces[y][x] = opponent;
-        let oppFours = 0, oppThrees = 0;
+        let oppFours = 0, oppThrees = 0, oppSleepThrees = 0;
         for (const [dx, dy] of dirs) {
             const { count, open } = this.countDirection(x, y, dx, dy, opponent);
             if (count === 4 && open >= 1) oppFours++;
             if (count === 3 && open === 2) oppThrees++;
+            if (count === 3 && open === 1) oppSleepThrees++;
         }
-        if (oppFours >= 1 || oppThrees >= 2) score += 60000;
+        if (oppFours >= 1 || oppThrees >= 2) score += 30000;
+        if (oppSleepThrees >= 2) score += 15000;  // 堵双眠三
         
         this.pieces[y][x] = null;
         score += (14 - Math.abs(x - 7) - Math.abs(y - 7)) * 2;
@@ -619,7 +618,7 @@ class GomokuOnline {
         }
         if (count === 3) {
             if (open === 2) return 5000 * bonus;   // 活三
-            if (open === 1) return 1500 * bonus;   // 眠三
+            if (open === 1) return 2500 * bonus;   // 眠三
         }
         if (count === 2) {
             if (open === 2) return 500 * bonus;    // 活二
